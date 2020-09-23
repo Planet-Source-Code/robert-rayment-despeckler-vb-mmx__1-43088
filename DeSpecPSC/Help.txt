@@ -1,0 +1,69 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  Basic Despeckler by  Robert Rayment  
+                 Jan/Feb 2003  V1.0
+
+  Despeckling can never be completely
+  automatic.  Trial and error, varying
+  clump and threshold sizes is necessary.
+  When despeckling is done patches can
+  be moved from Picture 1 to Picture 2.
+  Also individual pixels or a group of
+  4 pixels can be painted on to Picture 2.
+
+  The despeckling operations as well as the
+  filters, can be applied over the whole
+  picture or over a selected area using the
+  shape tool.  
+
+  NOTE that the despeckler and filters work
+  on Picture 1 giving a result on Picture 2.
+  So, to cascade operations copy Picture 2 
+  to Picture 1.
+
+  Hopefully most of the operations should
+  be self-evident, thanks to Ulli's class
+  for ToolTipTexts.  
+
+  It is useful to have the magnifier on for
+  painting pixels and de-spotting.  Note that
+  the magnifier can be moved by the mouse.
+
+  Pictures are loaded into Picture 1 and
+  saved from Picture 2.
+
+  Downloading i_view32.exe and placing it
+  in the application folder allows other
+  than standard VB file formats to be
+  loaded and saved:-
+  
+  for loading & saving non-standard VB
+  pictures use FREEWARE i_view32.exe 
+  by Irfan Skiljan
+  <www.irfanview.com>
+
+  See Notes.txt.
+
+  Extra files to be in same folder:
+  Despec.bin
+  Help.txt
+  Notes.txt
+  optionally i_view32.exe
+
+
+  Thanks to:
+
+  Ulli (PSC  CodeId=42051) for  CToolTip.cls
+
+  Carles P V for some excellent tweaks
+   particularly on API usage,
+
+  Manuel Santos (PSC CodeId=26303) filters
+   reference - much modified here.
+
+  VBAccelerator.com for OSDialog.cls
+   (modified)
+  
+  <www.xbeat.net/vbspeed/index.htm>
+   for CTimingPC.cls
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

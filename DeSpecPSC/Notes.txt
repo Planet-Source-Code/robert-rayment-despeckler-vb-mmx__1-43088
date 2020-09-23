@@ -1,0 +1,100 @@
+Despeckler notes  by  Robert Rayment
+
+The despeckling technique used is to take the
+average of the Red, Green and Blue components
+around a pixel(s) and to compare the absolute
+difference between each of the components and
+the R,G & B values at the pixel(s) being examined.
+If the absolute difference of any of the R,G or B
+values is above the threshold then the pixel(s) 
+are replaced by the average of the surroundings.
+
+With all despeckling there is always a compromise
+between noise removal and loss of detail.  At least
+this can be restricted to a selected area by using
+the Shape tool. Also for feint scratches, on fairly
+uniform backgronds, a nearby patch can be placed
+over it.
+
+Other more complicated methods look at intensity
+or hue, saturation and luminance differences.
+However this simple linear method does as well as
+most commercial despecklers that I've tried apart
+from the very latest such as PhotoShop 7 which a
+friend tried out for me (too expensive for me). You
+could try out some methods of your own if you've a 
+mind to.
+
+So, the pattern used are:-
+
+for Clumps
+
+1 pixel  111    2 pixels 1111   3 pixels 11111
+         101             1001            10001
+         111             1001            10001
+                         1111            10001
+                                         11111
+
+and for vertical Scratches
+
+1 pixel 101    2 pixels 1001    3 pixels 10001
+        101             1001             10001
+        
+etc. and for horizontal Scratches
+
+1 pixel 111    2 pixels 1111    3 pixels 11111
+        000             0000             00000
+        111             0000             00000
+                        1111             00000
+                                         11111
+
+etc.
+
+De-spotting replaces the spot by the average of 4 
+diagonal pixels.
+
+Shape selection uses control lines SL(i) to mark
+out the shape.  This is the easiset since it doesn't
+affect the underlying pixels.  
+
+For operations, just acting inside the selected shape,
+it is necessary to make a black & white mask and to
+test if that is black before applying an operation.
+
+The program saves the file DesPicPath.txt containing
+the last accessed folder.  If wanted the settings
+
+SLWidth = the Shape line thicness   1 or 2
+aClickON = Click or Click & Slide on bars True/False
+ASMON =  True/False run ASM or VB.
+
+could be saved as well as 
+
+The machine code (ASM) routines are much faster than VB
+in the IDE between 30 & 150 times faster.  Interestingly
+non-MMX asm is not much quicker compared with the VB exe
+compiled for fast native code and with the array boundary
+and integer overflow checks disabled.  The reason for this
+is that this program consists almost entirely of integer
+operations which usually compile efficiently. For this
+reason it is unlikely that, even if  written with C, it
+would be significantly faster.  However MMX is used and
+this runs 2 to 6 times faster than the VB exe.  This
+could almost certainly be further optimised though where
+possible, I've avoided stalls where an MMX instruction
+waits for a previous one to be completed.  Finely optimised
+MMX code, however, uses lots of MMX registers, unrolls
+loops etc and can quickly become hard to follow.
+
+The ASM code can be placed into a Resource file if wanted
+but I've left it loading a bin file, off the disk, in this
+program.
+
+If your new to ASM you might want to have a look at:-
+
+"NASM Editor, Assembler & Tutorial" on PSC (CodeId=31442).
+
+The Irfan viewer is a real treasure in that it can take a
+Command line from VB and functions off-screen.  I've only
+demonstrated its use for a few file formats but it has many
+other uses including cropping and printing images.
