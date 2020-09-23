@@ -1,0 +1,1784 @@
+     1                                  ;Despec.bin  NASM  by  Robert Rayment Feb 2003
+     2                                  ; NB Assumes MMX present. cpuid can be used to
+     3                                  ; to test for MMX if wanted.
+     4                                  
+     5                                  ; Contents          Approx line numbers
+     6                                  ; Despec1  1 pix            Line 176
+     7                                  ; Despec2  2x2 pix          Line 281
+     8                                  ; Despec3  3x3 pix          Line 457
+     9                                  ; Despec4  1 pix scratch    Line 680
+    10                                  ; Despec5  2 pix scratch    Line 710
+    11                                  ; Despec6  3 pix scratch    Line 854
+    12                                  ; Sharpness                 Line 1008
+    13                                  ; Softness                  Line 1098
+    14                                  ; Brightness                Line 1268
+    15                                  ; HorzEdges                 Line 1358
+    16                                  ; VertEdges                 Line 1448
+    17                                  ; Sum8              Line 1535
+    18                                  ; Sum12             Line 1570
+    19                                  ; Sum16             Line 1632
+    20                                  ; TestThreshold     Line 1710
+    21                                  ; Jump table        Line 1757
+    22                                  
+    23                                  ; VB
+    24                                  ;Type ASMVars
+    25                                  ;   PICH As Long
+    26                                  ;   PICW As Long
+    27                                  ;   ptrP1M As Long
+    28                                  ;   ptrP2M As Long
+    29                                  ;   ptrPPM As Long
+    30                                  ;   Threshold As Long
+    31                                  ;   aSelectShapeON As Long   ' 0 False
+    32                                  ;   FilterParam As Long
+    33                                  ;End Type
+    34                                  ;Public ASMStruc As ASMVars
+    35                                  ;
+    36                                  ;Public ptrMC, ptrStruc        ' Ptrs to MCode & Structure
+    37                                  ;Public bDespecMC() As Byte    ' Byte array to hold MCode
+    38                                  ;
+    39                                  ;Public Const Despec1 As Long = 0
+    40                                  ;Public Const Despec2 As Long = 1
+    41                                  ;Public Const Despec3 As Long = 2
+    42                                  ;Public Const Despec4 As Long = 3
+    43                                  ;Public Const Despec5 As Long = 4
+    44                                  ;Public Const Despec6 As Long = 5
+    45                                  ;Public Const Sharp As Long = 6
+    46                                  ;Public Const Soft As Long = 7
+    47                                  ;Public Const Bright As Long = 8
+    48                                  ;
+    49                                  ;Public ASMON As Boolean
+    50                                  ;
+    51                                  ;Public Sub FillASMStruc()
+    52                                  ;With ASMStruc
+    53                                  ;   .PICH = PICH
+    54                                  ;   .PICW = PICW
+    55                                  ;   .ptrP1M = VarPtr(bP1M(1, 1, 1))
+    56                                  ;   .ptrP2M = VarPtr(bP2M(1, 1, 1))
+    57                                  ;   .ptrPPM = VarPtr(bPPM(1, 1, 1))
+    58                                  ;   .Threshold = Threshold
+    59                                  ;   .aSelectShapeON = CLng(aSelectShapeON)   ' 0 False
+    60                                  ;   .FilterParam = FilterParam
+    61                                  ;End With
+    62                                  ;End Sub
+    63                                  ;
+    64                                  ;res = CallWindowProc(ptrMC, ptrStruc, 2&, 3&, OpCode)
+    65                                  ;                             8         12  16  20
+    66                                  
+    67                                  %macro movab 2      ;name & num of parameters
+    68                                    push dword %2     ;2nd param
+    69                                    pop dword %1      ;1st param
+    70                                  %endmacro           ;use  movab %1,%2
+    71                                  ;Allows eg  movab bmW,[ebx+4]
+    72                                  
+    73                                  ;Define names to match VB code
+    74                                  %define PICH          [ebp-4]
+    75                                  %define PICW          [ebp-8]
+    76                                  %define ptrP1M        [ebp-12]
+    77                                  %define ptrP2M        [ebp-16]
+    78                                  %define ptrPPM        [ebp-20]
+    79                                  %define Threshold     [ebp-24]
+    80                                  %define SelectShapeON [ebp-28]
+    81                                  %define ZeroFilterParam    [ebp-32]
+    82                                  
+    83                                  ; Some variables
+    84                                  %define FilterParam        [ebp-36]
+    85                                  %define Zero2    [ebp-40]
+    86                                  %define ZeroFP   [ebp-44]
+    87                                  %define FP       [ebp-48]    
+    88                                  %define dF       [ebp-52]    
+    89                                  
+    90                                  %define kx       [ebp-56]    
+    91                                  %define ky       [ebp-60]
+    92                                  
+    93                                  %define ptmc     [ebp-64]   ; ptr mcode buffer
+    94                                  
+    95                                  %define pPPM     [ebp-68]
+    96                                  %define PICW4    [ebp-72]
+    97                                  %define pPPMorg  [ebp-76]
+    98                                  
+    99                                  
+   100                                  [bits 32]
+   101                                  
+   102                                      ; Get absolute address to mcode buffer in VB
+   103 00000000 E893000000                  Call BufferADDR     ; 5B
+   104 00000005 2D05000000                  sub eax,5           ; -5B for CallBufferADDR
+   105                                  
+   106 0000000A 55                          push ebp
+   107 0000000B 89E5                        mov ebp,esp
+   108 0000000D 81EC4C000000                sub esp,76
+   109 00000013 57                          push edi
+   110 00000014 56                          push esi
+   111 00000015 53                          push ebx
+   112                                      
+   113 00000016 8945C0                      mov ptmc,eax
+   114                                  
+   115                                  
+   116                                      ;Fill structure
+   117 00000019 8B5D08                      mov ebx,[ebp+8]
+   118                                      movab PICH,           [ebx]
+   119 0000001C FF33                <1>   push dword %2
+   120 0000001E 8F45FC              <1>   pop dword %1
+   121                                      movab PICW,           [ebx+4]
+   122 00000021 FF7304              <1>   push dword %2
+   123 00000024 8F45F8              <1>   pop dword %1
+   124                                      movab ptrP1M,         [ebx+8]
+   125 00000027 FF7308              <1>   push dword %2
+   126 0000002A 8F45F4              <1>   pop dword %1
+   127                                      movab ptrP2M,         [ebx+12]
+   128 0000002D FF730C              <1>   push dword %2
+   129 00000030 8F45F0              <1>   pop dword %1
+   130                                      movab ptrPPM,         [ebx+16]
+   131 00000033 FF7310              <1>   push dword %2
+   132 00000036 8F45EC              <1>   pop dword %1
+   133                                      movab Threshold,      [ebx+20]
+   134 00000039 FF7314              <1>   push dword %2
+   135 0000003C 8F45E8              <1>   pop dword %1
+   136                                      movab SelectShapeON,  [ebx+24]
+   137 0000003F FF7318              <1>   push dword %2
+   138 00000042 8F45E4              <1>   pop dword %1
+   139                                      movab FilterParam,    [ebx+28]
+   140 00000045 FF731C              <1>   push dword %2
+   141 00000048 8F45DC              <1>   pop dword %1
+   142                                  ;----------------------------
+   143                                  
+   144 0000004B 8B5DF8                      mov ebx,PICW
+   145 0000004E C1E302                      shl ebx,2
+   146 00000051 895DB8                      mov PICW4,ebx
+   147                                  
+   148                                      ; Make mm6 = 4 Threshold words TH TH TH TH
+   149 00000054 8B45E8                      mov eax,Threshold
+   150 00000057 89C2                        mov edx,eax
+   151 00000059 C1E210                      shl edx,16
+   152 0000005C 01D0                        add eax,edx
+   153 0000005E 0F6EF0                      movd mm6,eax
+   154 00000061 0F6FFE                      movq mm7,mm6
+   155 00000064 0F62F7                      punpckldq mm6,mm7   ;mm6 = TH TH TH TH
+   156                                  
+   157                                      ; Zero dwords above for psrlw mm# FilterPram & FP
+   158 00000067 31C0                        xor eax,eax
+   159 00000069 8945E0                      mov ZeroFilterParam,eax
+   160 0000006C 8945D4                      mov ZeroFP,eax
+   161                                  
+   162                                      ; Using jump table
+   163 0000006F BB[00000000]                mov ebx,Sub0
+   164 00000074 8B4514                      mov eax,[ebp+20]    ;OpCode
+   165 00000077 3D09000000                  cmp eax,9
+   166 0000007C 7D0F                        jge GETOUT           ; Error
+   167 0000007E C1E002                      shl eax,2           ; x4
+   168 00000081 01C3                        add ebx,eax
+   169 00000083 035DC0                      add ebx,ptmc
+   170 00000086 8B03                        mov eax,[ebx]
+   171 00000088 0345C0                      add eax,ptmc
+   172 0000008B FFD0                        Call eax
+   173                                  
+   174                                  GETOUT:
+   175 0000008D 0F77                        emms
+   176 0000008F 5B                          pop ebx
+   177 00000090 5E                          pop esi
+   178 00000091 5F                          pop edi
+   179 00000092 89EC                        mov esp,ebp
+   180 00000094 5D                          pop ebp
+   181 00000095 C21000                      ret 16
+   182                                  
+   183                                  ;========================================
+   184                                  ; Get mcode buffer absolute start address
+   185                                  BufferADDR:
+   186 00000098 58                          pop eax
+   187 00000099 50                          push eax
+   188 0000009A C3                      RET
+   189                                  ;######################################################################
+   190                                  
+   191                                  Despec1:
+   192                                  
+   193 0000009B 8B7DF4                      mov edi,ptrP1M
+   194 0000009E 8B75F0                      mov esi,ptrP2M
+   195 000000A1 8B55EC                      mov edx,ptrPPM
+   196 000000A4 8955BC                      mov pPPM,edx
+   197                                  
+   198 000000A7 8B5DB8                      mov ebx, PICW4
+   199                                  
+   200 000000AA B901000000                  mov ecx,1
+   201                                  iyDS1:
+   202 000000AF 51                          push ecx
+   203 000000B0 B901000000                  mov ecx,1
+   204                                  ixDS1:
+   205 000000B5 51                          push ecx
+   206                                  
+   207 000000B6 8B55BC                      mov edx,pPPM
+   208 000000B9 8B441A04                    mov eax,[edx+ebx+4]
+   209 000000BD 3D00000000                  cmp eax,0
+   210 000000C2 0F853D000000                jne near NexixDS1   ; Not black
+   211                                      ;;;;;;;;;;;;;;;;;;
+   212                                  
+   213 000000C8 E8710A0000                  Call Sum8       ; mm0=|SA|SumR|SumG|SumB|
+   214                                                      ; also mm7=0
+   215                                      
+   216 000000CD 0F71D003                    psrlw mm0,3     ; w\8 mm0=|AvA|AvR|AvG|AvR|
+   217                                      
+   218 000000D1 0F6FE0                      movq mm4,mm0    ; mm4=|AvA|AvR|AvG|AvR|
+   219                                      
+   220 000000D4 0F6E4C1F04                  movd mm1,[edi+ebx+4]    ;P1M(x,y) | |ARGB|
+   221 000000D9 0F60CF                      punpcklbw mm1,mm7       ; mm1=|A|R|G|B|
+   222                                      
+   223 000000DC 0F6FD0                      movq mm2,mm0    ; mm2=|AvA|AvR|AvG|AvR|
+   224 000000DF 0FD9C1                      psubusw mm0,mm1
+   225 000000E2 0FD9CA                      psubusw mm1,mm2
+   226 000000E5 0FEBC1                      por mm0,mm1     ; mm0=ABS |AvA-A|AvR-R|AvG-G|AvB-B|
+   227                                      
+   228 000000E8 0F65C6                      pcmpgtw mm0,mm6     ; is data in mm0 > TH
+   229 000000EB 0F63C0                      packsswb mm0,mm0    ; pack result into mm0
+   230 000000EE 0F7EC0                      movd eax,mm0
+   231 000000F1 3D00000000                  cmp eax,0
+   232 000000F6 740D                        je NexixDS1         ; false all data <= TF
+   233                                  
+   234                                  DS1Replace:
+   235                                  
+   236 000000F8 0F67E7                      packuswb mm4,mm7    ; mm4 = | |ARGB|
+   237 000000FB 0F7E641E04                  movd[esi+ebx+4],mm4
+   238 00000100 0F7E641F04                  movd[edi+ebx+4],mm4
+   239                                  
+   240                                  ;;;;;;;;;;;;;;;;;;
+   241                                  NexixDS1:
+   242 00000105 81C704000000                add edi,4
+   243 0000010B 81C604000000                add esi,4
+   244 00000111 8B55BC                      mov edx,pPPM
+   245 00000114 81C204000000                add edx,4
+   246 0000011A 8955BC                      mov pPPM,edx
+   247                                  
+   248 0000011D 59                          pop ecx
+   249 0000011E 41                          inc ecx
+   250 0000011F 8B45F8                      mov eax,PICW
+   251 00000122 48                          dec eax
+   252 00000123 39C1                        cmp ecx,eax     ;ix-(PICW-1)
+   253 00000125 0F8C8AFFFFFF                jl near ixDS1
+   254                                  NexiyDS1:
+   255 0000012B 81C708000000                add edi,8
+   256 00000131 81C608000000                add esi,8
+   257 00000137 8B55BC                      mov edx,pPPM
+   258 0000013A 81C208000000                add edx,8
+   259 00000140 8955BC                      mov pPPM,edx
+   260                                  
+   261 00000143 59                          pop ecx
+   262 00000144 41                          inc ecx
+   263 00000145 8B45FC                      mov eax,PICH
+   264 00000148 48                          dec eax
+   265 00000149 39C1                        cmp ecx,eax     ;iy-(PICH-1)
+   266 0000014B 0F8C5EFFFFFF                jl near iyDS1
+   267                                  
+   268 00000151 0F77                        emms
+   269                                  
+   270                                  ; EDGES
+   271 00000153 8B45E4                          mov eax,SelectShapeON
+   272 00000156 3D00000000                      cmp eax,0
+   273 0000015B 7530                            jne DS1ret  ; Not False Select shape On ie no edges
+   274                                  
+   275 0000015D B801000000                      mov eax,1       ; ky=1
+   276 00000162 8945C4                          mov ky,eax
+   277 00000165 E85E080000                      Call HorzEdges
+   278 0000016A 8B45FC                          mov eax,PICH
+   279 0000016D 8945C4                          mov ky,eax      ; ky=PICH
+   280 00000170 E853080000                      Call HorzEdges
+   281                                  
+   282 00000175 B801000000                      mov eax,1
+   283 0000017A 8945C8                          mov kx,eax      ; ix=1
+   284 0000017D E809090000                      Call VertEdges
+   285 00000182 8B45F8                          mov eax,PICW
+   286 00000185 8945C8                          mov kx,eax      ; ix=PICW
+   287 00000188 E8FE080000                      Call VertEdges
+   288                                  
+   289                                  DS1ret:
+   290 0000018D 0F77                        emms
+   291                                  
+   292 0000018F C3                      RET
+   293                                  ;=============================================================
+   294                                  
+   295                                  Despec2:
+   296                                  
+   297                                      ; num\3 = (num * .3333 * 64)/64 == (num * 21) shr 6
+   298                                  
+   299 00000190 B815000000                  mov eax,21
+   300 00000195 89C2                        mov edx,eax
+   301 00000197 C1E210                      shl edx,16
+   302 0000019A 01D0                        add eax,edx
+   303 0000019C 0F6EE8                      movd mm5,eax
+   304 0000019F 0F6FE5                      movq mm4,mm5
+   305 000001A2 0F62EC                      punpckldq mm5,mm4   ; Multiplier mm5 = 21 21 21 21
+   306                                  
+   307                                  
+   308                                  
+   309 000001A5 8B7DF4                      mov edi,ptrP1M
+   310 000001A8 8B75F0                      mov esi,ptrP2M
+   311 000001AB 8B55EC                      mov edx,ptrPPM
+   312 000001AE 8955BC                      mov pPPM,edx
+   313 000001B1 8955B4                      mov pPPMorg,edx
+   314                                  
+   315 000001B4 8B5DB8                      mov ebx, PICW4
+   316                                  
+   317 000001B7 B901000000                  mov ecx,1
+   318                                  iyDS2:
+   319 000001BC 51                          push ecx
+   320 000001BD 57                          push edi
+   321 000001BE 56                          push esi
+   322 000001BF 8B55BC                      mov edx,pPPM
+   323 000001C2 8955B4                      mov pPPMorg,edx
+   324                                     
+   325 000001C5 B901000000                  mov ecx,1
+   326                                  ixDS2:
+   327 000001CA 51                          push ecx
+   328 000001CB 8B55BC                      mov edx,pPPM
+   329 000001CE 8B441A04                    mov eax,[edx+ebx+4]
+   330 000001D2 3D00000000                  cmp eax,0
+   331 000001D7 0F8567000000                jne near NexixDS2   ; Not black
+   332                                      ;;;;;;;;;;;;;;;;;;
+   333                                  
+   334 000001DD E8AF090000                  Call Sum12      ; mm0=|SA|SumR|SumG|SumB|
+   335                                      ; max Sum = 12*255 = 3060
+   336                                      ; max multiplier for words = 65536\3060 = 21
+   337                                      ; \12
+   338 000001E2 0FD5C5                      pmullw mm0,mm5      ; mm1=|21*A|21*R|21*G|21*B|
+   339 000001E5 0F71D008                    psrlw mm0,8         ; mm1= w\(64*4) == mm0 w\12
+   340 000001E9 0F6FE0                      movq mm4,mm0        ; also mm4=RGBAv
+   341                                  
+   342 000001EC 57                          push edi
+   343 000001ED 56                          push esi
+   344                                  
+   345                                  DS2DoIXIY:
+   346 000001EE 01DF                        add edi,ebx
+   347 000001F0 81C704000000                add edi,4           ; edi->P1M(1,ix,iy)
+   348 000001F6 01DE                        add esi,ebx
+   349 000001F8 81C604000000                add esi,4           ; esi->P2M(1,ix,iy)
+   350                                      
+   351 000001FE E8B10A0000                  CALL TestThreshold
+   352                                  ;-----------------
+   353                                  
+   354                                  DS2DoIXp1IY:
+   355 00000203 81C704000000                add edi,4       ; ix+1,iy
+   356 00000209 81C604000000                add esi,4
+   357                                  
+   358 0000020F E8A00A0000                  CALL TestThreshold
+   359                                  ;-----------------
+   360                                  
+   361                                  DS2DoIXIYp1:
+   362 00000214 5E                          pop esi
+   363 00000215 5F                          pop edi
+   364 00000216 57                          push edi
+   365 00000217 56                          push esi
+   366                                  
+   367 00000218 01DF                        add edi,ebx
+   368 0000021A 01DF                        add edi,ebx
+   369 0000021C 81C704000000                add edi,4       ; ix,iy+1
+   370 00000222 01DE                        add esi,ebx
+   371 00000224 01DE                        add esi,ebx
+   372 00000226 81C604000000                add esi,4
+   373                                  
+   374 0000022C E8830A0000                  CALL TestThreshold
+   375                                  ;-----------------
+   376                                  
+   377                                  DS2DoIXp1IYp1:
+   378 00000231 81C704000000                add edi,4       ; ix+1,iy+1
+   379 00000237 81C604000000                add esi,4
+   380                                  
+   381 0000023D E8720A0000                  CALL TestThreshold
+   382                                  ;-----------------
+   383                                  
+   384                                  DS2pop:
+   385 00000242 5E                          pop esi
+   386 00000243 5F                          pop edi
+   387                                  
+   388                                  ;;;;;;;;;;;;;;;;;;
+   389                                  NexixDS2:
+   390 00000244 81C708000000                add edi,8
+   391 0000024A 81C608000000                add esi,8           ; ix+2
+   392                                      
+   393 00000250 8B55BC                      mov edx,pPPM
+   394 00000253 81C208000000                add edx,8
+   395 00000259 8955BC                      mov pPPM,edx
+   396                                  
+   397 0000025C 59                          pop ecx
+   398 0000025D 41                          inc ecx
+   399 0000025E 41                          inc ecx
+   400 0000025F 8B45F8                      mov eax,PICW
+   401 00000262 48                          dec eax             ; PICW-1
+   402 00000263 48                          dec eax             ; PICW-2
+   403 00000264 39C1                        cmp ecx,eax
+   404 00000266 0F8C5EFFFFFF                jl near ixDS2
+   405                                  
+   406                                  NexiyDS2:
+   407 0000026C 5E                          pop esi
+   408 0000026D 5F                          pop edi
+   409                                      
+   410 0000026E 01DF                        add edi,ebx
+   411 00000270 01DF                        add edi,ebx     ; iy+2
+   412 00000272 01DE                        add esi,ebx
+   413 00000274 01DE                        add esi,ebx
+   414                                      
+   415 00000276 8B55B4                      mov edx,pPPMorg
+   416 00000279 01DA                        add edx,ebx
+   417 0000027B 01DA                        add edx,ebx
+   418 0000027D 8955BC                      mov pPPM,edx
+   419 00000280 8955B4                      mov pPPMorg,edx
+   420                                  
+   421 00000283 59                          pop ecx
+   422 00000284 41                          inc ecx
+   423 00000285 41                          inc ecx
+   424 00000286 8B45FC                      mov eax,PICH
+   425 00000289 48                          dec eax             ; PICH-1
+   426 0000028A 48                          dec eax             ; PICH-2
+   427 0000028B 39C1                        cmp ecx,eax
+   428 0000028D 0F8C29FFFFFF                jl near iyDS2
+   429 00000293 0F77                        emms
+   430                                  
+   431                                  ; EDGES
+   432 00000295 8B45E4                          mov eax,SelectShapeON
+   433 00000298 3D00000000                      cmp eax,0
+   434 0000029D 7555                            jne DS2ret  ; Not False Select shape On ie no edges
+   435                                  
+   436 0000029F B801000000                      mov eax,1
+   437 000002A4 8945C4                          mov ky,eax          ; iy=1
+   438 000002A7 E81C070000                      Call HorzEdges
+   439                                          
+   440 000002AC B802000000                      mov eax,2
+   441 000002B1 8945C4                          mov ky,eax          ; iy=2
+   442 000002B4 E80F070000                      Call HorzEdges
+   443                                          
+   444 000002B9 8B45FC                          mov eax,PICH
+   445 000002BC 8945C4                          mov ky,eax          ; iy=PICH
+   446 000002BF E804070000                      Call HorzEdges
+   447                                  
+   448 000002C4 8B45FC                          mov eax,PICH
+   449 000002C7 48                              dec eax
+   450 000002C8 8945C4                          mov ky,eax          ; iy=PICH-1
+   451 000002CB E8F8060000                      Call HorzEdges
+   452                                  
+   453 000002D0 B801000000                      mov eax,1
+   454 000002D5 8945C8                          mov kx,eax          ; ix=1
+   455 000002D8 E8AE070000                      Call VertEdges
+   456                                          
+   457 000002DD 8B45F8                          mov eax,PICW
+   458 000002E0 48                              dec eax             ; ix=PICW-1
+   459 000002E1 8945C8                          mov kx,eax
+   460 000002E4 E8A2070000                      Call VertEdges
+   461                                          
+   462 000002E9 8B45F8                          mov eax,PICW        ; ix=PICW
+   463 000002EC 8945C8                          mov kx,eax
+   464 000002EF E897070000                      Call VertEdges
+   465                                  
+   466                                  DS2ret:
+   467                                  
+   468 000002F4 0F77                        emms
+   469                                  
+   470 000002F6 C3                      RET
+   471                                  ;=============================================================
+   472                                  
+   473                                  Despec3:
+   474                                  
+   475 000002F7 8B7DF4                      mov edi,ptrP1M
+   476 000002FA 8B75F0                      mov esi,ptrP2M
+   477 000002FD 8B55EC                      mov edx,ptrPPM
+   478 00000300 8955BC                      mov pPPM,edx
+   479 00000303 8955B4                      mov pPPMorg,edx
+   480                                  
+   481 00000306 8B5DB8                      mov ebx, PICW4
+   482                                  
+   483 00000309 B901000000                  mov ecx,1
+   484                                  iyDS3:
+   485 0000030E 51                          push ecx
+   486 0000030F 57                          push edi
+   487 00000310 56                          push esi
+   488 00000311 8B55BC                      mov edx,pPPM
+   489 00000314 8955B4                      mov pPPMorg,edx
+   490                                  
+   491 00000317 B901000000                  mov ecx,1
+   492                                  ixDS3:
+   493 0000031C 51                          push ecx
+   494                                  
+   495 0000031D 8B55BC                      mov edx,pPPM
+   496 00000320 8B441A04                    mov eax,[edx+ebx+4]
+   497 00000324 3D00000000                  cmp eax,0
+   498 00000329 0F85C9000000                jne near NexixDS3   ; Not black
+   499                                      ;;;;;;;;;;;;;;;;;;
+   500                                  
+   501 0000032F E8DA080000                  Call Sum16      ; mm0=|SA|SumR|SumG|SumB|
+   502 00000334 0F71D004                    psrlw mm0,4     ; w\16 mm0=|AvA|AvR|AvG|AvR|
+   503 00000338 0F6FE0                      movq mm4,mm0        ; also mm4=RGBAv
+   504                                  
+   505                                  
+   506 0000033B 57                          push edi
+   507 0000033C 56                          push esi
+   508                                  
+   509                                  DS3DoIXIY:  ; ROW 1
+   510 0000033D 01DF                        add edi,ebx
+   511 0000033F 81C704000000                add edi,4           ; edi->P1M(1,ix,iy)
+   512 00000345 01DE                        add esi,ebx
+   513 00000347 81C604000000                add esi,4           ; esi->P2M(1,ix,iy)
+   514                                      
+   515 0000034D E862090000                  CALL TestThreshold
+   516                                  ;-----------------
+   517                                  
+   518                                  DS3DoIXp1IY:
+   519 00000352 81C704000000                add edi,4       ; ix+1,iy
+   520 00000358 81C604000000                add esi,4
+   521                                  
+   522 0000035E E851090000                  CALL TestThreshold
+   523                                  ;-----------------
+   524                                  
+   525                                  DS3DoIXp2IY:
+   526 00000363 81C704000000                add edi,4       ; ix+2,iy
+   527 00000369 81C604000000                add esi,4
+   528                                  
+   529 0000036F E840090000                  CALL TestThreshold
+   530                                  ;-----------------
+   531                                  
+   532                                  DS3DoIXIYp1:    ; ROW 2
+   533 00000374 5E                          pop esi
+   534 00000375 5F                          pop edi
+   535 00000376 57                          push edi
+   536 00000377 56                          push esi
+   537                                  
+   538 00000378 01DF                        add edi,ebx
+   539 0000037A 01DF                        add edi,ebx
+   540 0000037C 81C704000000                add edi,4       ; ix,iy+1
+   541 00000382 01DE                        add esi,ebx
+   542 00000384 01DE                        add esi,ebx
+   543 00000386 81C604000000                add esi,4
+   544                                  
+   545 0000038C E823090000                  CALL TestThreshold
+   546                                  ;-----------------
+   547                                  
+   548                                  DS3DoIXp1IYp1:
+   549 00000391 81C704000000                add edi,4       ; ix+1,iy+1
+   550 00000397 81C604000000                add esi,4
+   551                                  
+   552 0000039D E812090000                  CALL TestThreshold
+   553                                  ;-----------------
+   554                                  
+   555                                  DS3DoIXp2IYp1:
+   556 000003A2 81C704000000                add edi,4       ; ix+2,iy+1
+   557 000003A8 81C604000000                add esi,4
+   558                                  
+   559 000003AE E801090000                  CALL TestThreshold
+   560                                  ;-----------------
+   561                                  
+   562                                  DS3DoIXIYp2:    ; ROW 3
+   563 000003B3 5E                          pop esi
+   564 000003B4 5F                          pop edi
+   565 000003B5 57                          push edi
+   566 000003B6 56                          push esi
+   567                                  
+   568 000003B7 01DF                        add edi,ebx
+   569 000003B9 01DF                        add edi,ebx
+   570 000003BB 01DF                        add edi,ebx
+   571 000003BD 81C704000000                add edi,4       ; ix,iy+2
+   572 000003C3 01DE                        add esi,ebx
+   573 000003C5 01DE                        add esi,ebx
+   574 000003C7 01DE                        add esi,ebx
+   575 000003C9 81C604000000                add esi,4
+   576                                  
+   577 000003CF E8E0080000                  CALL TestThreshold
+   578                                  ;-----------------
+   579                                  
+   580                                  DS3DoIXp1IYp2:
+   581 000003D4 81C704000000                add edi,4       ; ix+1,iy+2
+   582 000003DA 81C604000000                add esi,4
+   583                                  
+   584 000003E0 E8CF080000                  CALL TestThreshold
+   585                                  ;-----------------
+   586                                  
+   587                                  DS3DoIXp2IYp2:
+   588 000003E5 81C704000000                add edi,4       ; ix+2,iy+2
+   589 000003EB 81C604000000                add esi,4
+   590                                  
+   591 000003F1 E8BE080000                  CALL TestThreshold
+   592                                  ;-----------------
+   593                                  
+   594                                  DS3pop:
+   595 000003F6 5E                          pop esi
+   596 000003F7 5F                          pop edi
+   597                                  
+   598                                  ;;;;;;;;;;;;;;;;;;
+   599                                  NexixDS3:
+   600 000003F8 81C708000000                add edi,8
+   601 000003FE 81C608000000                add esi,8           ; ix+2
+   602                                      
+   603 00000404 8B55BC                      mov edx,pPPM
+   604 00000407 81C208000000                add edx,8
+   605 0000040D 8955BC                      mov pPPM,edx
+   606                                  
+   607 00000410 59                          pop ecx
+   608 00000411 41                          inc ecx
+   609 00000412 41                          inc ecx
+   610 00000413 8B45F8                      mov eax,PICW
+   611 00000416 48                          dec eax             ; PICW-1
+   612 00000417 48                          dec eax             ; PICW-2
+   613 00000418 48                          dec eax             ; PICW-3
+   614 00000419 39C1                        cmp ecx,eax
+   615 0000041B 0F8CFBFEFFFF                jl near ixDS3
+   616                                  
+   617                                  NexiyDS3:
+   618 00000421 5E                          pop esi
+   619 00000422 5F                          pop edi
+   620                                      
+   621 00000423 01DF                        add edi,ebx
+   622 00000425 01DF                        add edi,ebx     ; iy+2
+   623 00000427 01DE                        add esi,ebx
+   624 00000429 01DE                        add esi,ebx
+   625                                      
+   626 0000042B 8B55B4                      mov edx,pPPMorg
+   627 0000042E 01DA                        add edx,ebx
+   628 00000430 01DA                        add edx,ebx
+   629 00000432 8955BC                      mov pPPM,edx
+   630 00000435 8955B4                      mov pPPMorg,edx
+   631                                  
+   632 00000438 59                          pop ecx
+   633 00000439 41                          inc ecx
+   634 0000043A 41                          inc ecx
+   635 0000043B 8B45FC                      mov eax,PICH
+   636 0000043E 48                          dec eax             ; PICH-1
+   637 0000043F 48                          dec eax             ; PICH-2
+   638 00000440 48                          dec eax             ; PICH-3
+   639 00000441 39C1                        cmp ecx,eax
+   640 00000443 0F8CC5FEFFFF                jl near iyDS3
+   641 00000449 0F77                        emms
+   642                                  
+   643                                  ; EDGES
+   644 0000044B 8B45E4                          mov eax,SelectShapeON
+   645 0000044E 3D00000000                      cmp eax,0
+   646 00000453 756F                            jne DS3ret  ; Not False Select shape On ie no edges
+   647                                  
+   648 00000455 B801000000                      mov eax,1           ; ky= 1
+   649 0000045A 8945C4                          mov ky,eax
+   650 0000045D E866050000                      Call HorzEdges
+   651                                          
+   652 00000462 B802000000                      mov eax,2           ; ky=2
+   653 00000467 8945C4                          mov ky,eax
+   654 0000046A E859050000                      Call HorzEdges
+   655                                          
+   656 0000046F 8B45FC                          mov eax,PICH
+   657 00000472 48                              dec eax             ; ky=PICH-2
+   658 00000473 48                              dec eax
+   659 00000474 8945C4                          mov ky,eax
+   660 00000477 E84C050000                      Call HorzEdges
+   661                                  
+   662                                  
+   663 0000047C 8B45FC                          mov eax,PICH
+   664 0000047F 48                              dec eax             ; PICH-1
+   665 00000480 8945C4                          mov ky,eax
+   666 00000483 E840050000                      Call HorzEdges
+   667                                  
+   668 00000488 8B45FC                          mov eax,PICH        ; PICH
+   669 0000048B 8945C4                          mov ky,eax
+   670 0000048E E835050000                      Call HorzEdges
+   671                                  
+   672 00000493 B801000000                      mov eax,1           ; ix=1
+   673 00000498 8945C8                          mov kx,eax
+   674 0000049B E8EB050000                      Call VertEdges
+   675                                  
+   676 000004A0 B802000000                      mov eax,2           ; ix=2
+   677 000004A5 8945C8                          mov kx,eax
+   678 000004A8 E8DE050000                      Call VertEdges
+   679                                  
+   680 000004AD 8B45F8                          mov eax,PICW
+   681 000004B0 48                              dec eax             ; ix=PICW-1
+   682 000004B1 8945C8                          mov kx,eax
+   683 000004B4 E8D2050000                      Call VertEdges
+   684                                  
+   685 000004B9 8B45F8                          mov eax,PICW
+   686 000004BC 8945C8                          mov kx,eax          ; ix=PICW
+   687 000004BF E8C7050000                      Call VertEdges
+   688                                  
+   689                                  DS3ret:
+   690                                  
+   691 000004C4 0F77                        emms
+   692                                  
+   693 000004C6 C3                      RET
+   694                                  ;=============================================================
+   695                                  
+   696                                  Despec4:    ;1 pixel scratches
+   697                                  
+   698                                      ; Horz
+   699 000004C7 8B4DFC                      mov ecx,PICH
+   700                                  ForHDS4:
+   701 000004CA 51                          push ecx
+   702 000004CB 894DC4                      mov ky,ecx
+   703 000004CE E8F5040000                  Call HorzEdges
+   704                                  NexHDS4:
+   705 000004D3 59                          pop ecx
+   706 000004D4 49                          dec ecx
+   707 000004D5 75F3                        jnz ForHDS4
+   708                                  
+   709                                      ; Vert
+   710 000004D7 B901000000                  mov ecx,1
+   711                                  ForVDS4:
+   712 000004DC 51                          push ecx
+   713 000004DD 894DC8                      mov kx,ecx
+   714 000004E0 E8A6050000                  Call VertEdges
+   715                                  NexVDS4:
+   716 000004E5 59                          pop ecx
+   717 000004E6 41                          inc ecx
+   718 000004E7 3B4DF8                      cmp ecx,PICW
+   719 000004EA 7EF0                        jle ForVDS4
+   720                                  
+   721 000004EC 0F77                        emms    
+   722                                  
+   723 000004EE C3                      RET
+   724                                  ;=============================================================
+   725                                  
+   726                                  Despec5:    ; 2 pixel scratches
+   727                                  
+   728 000004EF 8B7DF4                      mov edi,ptrP1M
+   729 000004F2 8B75F0                      mov esi,ptrP2M
+   730 000004F5 8B55EC                      mov edx,ptrPPM
+   731 000004F8 8955BC                      mov pPPM,edx
+   732 000004FB 8955B4                      mov pPPMorg,edx
+   733                                  
+   734 000004FE 8B5DB8                      mov ebx, PICW4
+   735 00000501 0FEFFF                      pxor mm7,mm7
+   736                                  
+   737 00000504 B901000000                  mov ecx,1
+   738                                  iyDS5:
+   739 00000509 51                          push ecx
+   740                                  
+   741 0000050A 57                          push edi
+   742 0000050B 56                          push esi
+   743 0000050C 8B55BC                      mov edx,pPPM
+   744 0000050F 8955B4                      mov pPPMorg,edx
+   745                                  
+   746 00000512 B901000000                  mov ecx,1
+   747                                  ixDS5:
+   748 00000517 51                          push ecx
+   749                                  
+   750 00000518 57                          push edi
+   751 00000519 56                          push esi
+   752                                  
+   753 0000051A 8B55BC                      mov edx,pPPM
+   754 0000051D 8B441A04                    mov eax,[edx+ebx+4] ; ix+1,iy+1
+   755 00000521 3D00000000                  cmp eax,0
+   756 00000526 0F8578000000                jne near NexixDS5   ; Not black
+   757                                      ;;;;;;;;;;;;;;;;;;
+   758                                  
+   759                                      ; ABOVE & BELOW - HORIZONTAL SCRATCGES
+   760                                      
+   761                                  ;    push edi
+   762                                  ;    push esi
+   763                                      
+   764 0000052C 0F6E07                      movd mm0,[edi]      ; y
+   765 0000052F 01DF                        add edi,ebx
+   766 00000531 01DF                        add edi,ebx
+   767 00000533 01DF                        add edi,ebx
+   768 00000535 0F6E0F                      movd mm1,[edi]      ; y+3
+   769 00000538 0F60C7                      punpcklbw mm0,mm7
+   770 0000053B 0F60CF                      punpcklbw mm1,mm7
+   771 0000053E 0FDDC1                      paddusw mm0,mm1
+   772 00000541 0F71D001                    psrlw mm0,1     ; w\2 mm0=|AvA|AvR|AvG|AvR|
+   773                                      
+   774 00000545 0F6FE0                      movq mm4,mm0    ; mm4=|AvA|AvR|AvG|AvR|
+   775                                  
+   776 00000548 5E                          pop esi
+   777 00000549 5F                          pop edi         ; y
+   778 0000054A 57                          push edi
+   779 0000054B 56                          push esi
+   780                                      
+   781 0000054C 01DF                        add edi,ebx     ; y+1
+   782 0000054E 01DE                        add esi,ebx
+   783                                      
+   784 00000550 E85F070000                  Call TestThreshold
+   785                                  
+   786 00000555 01DF                        add edi,ebx     ; y+2
+   787 00000557 01DE                        add esi,ebx
+   788                                      
+   789 00000559 E856070000                  Call TestThreshold
+   790                                  
+   791 0000055E 5E                          pop esi
+   792 0000055F 5F                          pop edi     ; x,y
+   793 00000560 57                          push edi
+   794 00000561 56                          push esi
+   795                                  
+   796                                      ; LEFT & RIGHT - VERTICAL SCRATCGES
+   797                                  
+   798 00000562 0F6E07                      movd mm0,[edi]      ; y
+   799 00000565 81C70C000000                add edi,12          ; x+3
+   800 0000056B 0F6E0F                      movd mm1,[edi] 
+   801                                  
+   802 0000056E 0F60C7                      punpcklbw mm0,mm7
+   803 00000571 0F60CF                      punpcklbw mm1,mm7
+   804 00000574 0FDDC1                      paddusw mm0,mm1
+   805 00000577 0F71D001                    psrlw mm0,1     ; w\2 mm0=|AvA|AvR|AvG|AvR|
+   806                                      
+   807 0000057B 0F6FE0                      movq mm4,mm0    ; mm4=|AvA|AvR|AvG|AvR|
+   808                                  
+   809 0000057E 5E                          pop esi
+   810 0000057F 5F                          pop edi
+   811 00000580 57                          push edi
+   812 00000581 56                          push esi
+   813                                  
+   814                                  
+   815 00000582 81C604000000                add esi,4       ; x+1
+   816 00000588 81C704000000                add edi,4
+   817                                  
+   818 0000058E E821070000                  Call TestThreshold
+   819                                  
+   820 00000593 81C604000000                add esi,4       ; x+2,y
+   821 00000599 81C704000000                add edi,4
+   822                                  
+   823 0000059F E810070000                  Call TestThreshold
+   824                                  
+   825                                  ;;;;;;;;;;;;;;;;;;
+   826                                  NexixDS5:
+   827 000005A4 5E                          pop esi
+   828 000005A5 5F                          pop edi
+   829                                  
+   830 000005A6 81C704000000                add edi,4       ; x+1,y
+   831 000005AC 81C604000000                add esi,4
+   832 000005B2 8B55BC                      mov edx,pPPM
+   833 000005B5 81C204000000                add edx,4
+   834 000005BB 8955BC                      mov pPPM,edx
+   835                                  
+   836 000005BE 59                          pop ecx
+   837 000005BF 41                          inc ecx
+   838 000005C0 8B45F8                      mov eax,PICW
+   839 000005C3 48                          dec eax
+   840 000005C4 48                          dec eax
+   841 000005C5 48                          dec eax
+   842 000005C6 39C1                        cmp ecx,eax     ;ix-(PICW-3)
+   843 000005C8 0F8C49FFFFFF                jl near ixDS5
+   844                                  NexiyDS5:
+   845                                  
+   846 000005CE 5E                          pop esi
+   847 000005CF 5F                          pop edi
+   848                                      
+   849 000005D0 01DF                        add edi,ebx     ; iy+1
+   850 000005D2 01DE                        add esi,ebx
+   851                                      
+   852 000005D4 8B55B4                      mov edx,pPPMorg
+   853 000005D7 01DA                        add edx,ebx
+   854 000005D9 8955BC                      mov pPPM,edx
+   855 000005DC 8955B4                      mov pPPMorg,edx
+   856                                  
+   857 000005DF 59                          pop ecx
+   858 000005E0 41                          inc ecx
+   859 000005E1 8B45FC                      mov eax,PICH
+   860 000005E4 48                          dec eax
+   861 000005E5 48                          dec eax
+   862 000005E6 48                          dec eax
+   863 000005E7 39C1                        cmp ecx,eax     ;iy-(PICH-3)
+   864 000005E9 0F8C1AFFFFFF                jl near iyDS5
+   865                                  
+   866 000005EF 0F77                        emms
+   867 000005F1 C3                      RET
+   868                                  ;=============================================================
+   869                                  
+   870                                  Despec6:    ; 3 pixel scratches
+   871                                  
+   872                                  
+   873 000005F2 8B7DF4                      mov edi,ptrP1M
+   874 000005F5 8B75F0                      mov esi,ptrP2M
+   875 000005F8 8B55EC                      mov edx,ptrPPM
+   876 000005FB 8955BC                      mov pPPM,edx
+   877 000005FE 8955B4                      mov pPPMorg,edx
+   878                                  
+   879 00000601 8B5DB8                      mov ebx, PICW4
+   880 00000604 0FEFFF                      pxor mm7,mm7
+   881                                  
+   882 00000607 B901000000                  mov ecx,1
+   883                                  iyDS6:
+   884 0000060C 51                          push ecx
+   885 0000060D 57                          push edi
+   886 0000060E 56                          push esi
+   887 0000060F 8B55BC                      mov edx,pPPM
+   888 00000612 8955B4                      mov pPPMorg,edx
+   889                                  
+   890 00000615 B901000000                  mov ecx,1
+   891                                  ixDS6:
+   892 0000061A 51                          push ecx
+   893                                  
+   894 0000061B 57                          push edi
+   895 0000061C 56                          push esi
+   896                                  
+   897 0000061D 8B55BC                      mov edx,pPPM
+   898 00000620 8B441A04                    mov eax,[edx+ebx+4] ; ix+1,iy+1
+   899 00000624 3D00000000                  cmp eax,0
+   900 00000629 0F8594000000                jne near NexixDS6   ; Not black
+   901                                      ;;;;;;;;;;;;;;;;;;
+   902                                  
+   903                                      ; ABOVE & BELOW - HORIZONTAL SCRATCGES
+   904                                      
+   905                                  ;    push edi
+   906                                  ;    push esi
+   907                                      
+   908 0000062F 0F6E07                      movd mm0,[edi]      ; y
+   909 00000632 01DF                        add edi,ebx
+   910 00000634 01DF                        add edi,ebx
+   911 00000636 01DF                        add edi,ebx
+   912 00000638 01DF                        add edi,ebx
+   913 0000063A 0F6E0F                      movd mm1,[edi]      ; y+4
+   914 0000063D 0F60C7                      punpcklbw mm0,mm7
+   915 00000640 0F60CF                      punpcklbw mm1,mm7
+   916 00000643 0FDDC1                      paddusw mm0,mm1
+   917 00000646 0F71D001                    psrlw mm0,1     ; w\2 mm0=|AvA|AvR|AvG|AvR|
+   918                                      
+   919 0000064A 0F6FE0                      movq mm4,mm0    ; mm4=|AvA|AvR|AvG|AvR|
+   920                                  
+   921 0000064D 5E                          pop esi
+   922 0000064E 5F                          pop edi         ; y
+   923 0000064F 57                          push edi
+   924 00000650 56                          push esi
+   925                                      
+   926 00000651 01DF                        add edi,ebx     ; y+1
+   927 00000653 01DE                        add esi,ebx
+   928                                      
+   929 00000655 E85A060000                  Call TestThreshold
+   930                                  
+   931 0000065A 01DF                        add edi,ebx     ; y+2
+   932 0000065C 01DE                        add esi,ebx
+   933                                      
+   934 0000065E E851060000                  Call TestThreshold
+   935                                  
+   936 00000663 01DF                        add edi,ebx     ; y+3
+   937 00000665 01DE                        add esi,ebx
+   938                                      
+   939 00000667 E848060000                  Call TestThreshold
+   940                                  
+   941 0000066C 5E                          pop esi
+   942 0000066D 5F                          pop edi     ; x,y
+   943 0000066E 57                          push edi
+   944 0000066F 56                          push esi
+   945                                  
+   946                                      ; LEFT & RIGHT - VERTICAL SCRATCHES
+   947                                  
+   948 00000670 0F6E07                      movd mm0,[edi]      ; y
+   949 00000673 81C710000000                add edi,16          ; x+4
+   950 00000679 0F6E0F                      movd mm1,[edi] 
+   951                                  
+   952 0000067C 0F60C7                      punpcklbw mm0,mm7
+   953 0000067F 0F60CF                      punpcklbw mm1,mm7
+   954 00000682 0FDDC1                      paddusw mm0,mm1
+   955 00000685 0F71D001                    psrlw mm0,1     ; w\2 mm0=|AvA|AvR|AvG|AvR|
+   956                                      
+   957 00000689 0F6FE0                      movq mm4,mm0    ; mm4=|AvA|AvR|AvG|AvR|
+   958                                  
+   959 0000068C 5E                          pop esi
+   960 0000068D 5F                          pop edi
+   961 0000068E 57                          push edi
+   962 0000068F 56                          push esi
+   963                                  
+   964                                  
+   965 00000690 81C604000000                add esi,4       ; x+1
+   966 00000696 81C704000000                add edi,4
+   967                                  
+   968 0000069C E813060000                  Call TestThreshold
+   969                                  
+   970 000006A1 81C604000000                add esi,4       ; x+2,y
+   971 000006A7 81C704000000                add edi,4
+   972                                  
+   973 000006AD E802060000                  Call TestThreshold
+   974                                  
+   975 000006B2 81C604000000                add esi,4       ; x+3,y
+   976 000006B8 81C704000000                add edi,4
+   977                                  
+   978 000006BE E8F1050000                  Call TestThreshold
+   979                                  
+   980                                  ;;;;;;;;;;;;;;;;;;
+   981                                  NexixDS6:
+   982 000006C3 5E                          pop esi
+   983 000006C4 5F                          pop edi
+   984 000006C5 81C704000000                add edi,4       ; x+1,y
+   985 000006CB 81C604000000                add esi,4
+   986 000006D1 8B55BC                      mov edx,pPPM
+   987 000006D4 81C204000000                add edx,4
+   988 000006DA 8955BC                      mov pPPM,edx
+   989                                  
+   990 000006DD 59                          pop ecx
+   991 000006DE 41                          inc ecx
+   992 000006DF 8B45F8                      mov eax,PICW
+   993 000006E2 48                          dec eax
+   994 000006E3 48                          dec eax
+   995 000006E4 48                          dec eax
+   996 000006E5 39C1                        cmp ecx,eax     ;ix-(PICW-3)
+   997 000006E7 0F8C2DFFFFFF                jl near ixDS6
+   998                                  NexiyDS6:
+   999                                  
+  1000 000006ED 5E                          pop esi
+  1001 000006EE 5F                          pop edi
+  1002                                      
+  1003 000006EF 01DF                        add edi,ebx     ; iy+1
+  1004 000006F1 01DE                        add esi,ebx
+  1005                                      
+  1006 000006F3 8B55B4                      mov edx,pPPMorg
+  1007 000006F6 01DA                        add edx,ebx
+  1008 000006F8 8955BC                      mov pPPM,edx
+  1009 000006FB 8955B4                      mov pPPMorg,edx
+  1010                                  
+  1011 000006FE 59                          pop ecx
+  1012 000006FF 41                          inc ecx
+  1013 00000700 8B45FC                      mov eax,PICH
+  1014 00000703 48                          dec eax
+  1015 00000704 48                          dec eax
+  1016 00000705 48                          dec eax
+  1017 00000706 39C1                        cmp ecx,eax     ;iy-(PICH-3)
+  1018 00000708 0F8CFEFEFFFF                jl near iyDS6
+  1019                                  
+  1020 0000070E 0F77                        emms
+  1021 00000710 C3                      RET
+  1022                                  ;=============================================================
+  1023                                  
+  1024                                  Sharpness:
+  1025                                  
+  1026 00000711 8B4DDC                      mov ecx,FilterParam ; 1,2,3,4
+  1027 00000714 B801000000                  mov eax,1
+  1028 00000719 D3E0                        shl eax,CL          ; \dF = 2^FilterParam = 2,4,8,16
+  1029 0000071B 0508000000                  add eax,8
+  1030 00000720 89C2                        mov edx,eax
+  1031 00000722 C1E210                      shl edx,16
+  1032 00000725 01D0                        add eax,edx
+  1033 00000727 0F6EE0                      movd mm4,eax
+  1034 0000072A 0F6FEC                      movq mm5,mm4
+  1035 0000072D 0F62E5                      punpckldq mm4,mm5   ; Multiplier mm4 = FP FP FP FP
+  1036                                  
+  1037 00000730 B8FFFFFF00                  mov eax,0FFFFFFh
+  1038 00000735 0F6EE8                      movd mm5,eax        ; mm5 to mask out Alpha
+  1039                                      
+  1040 00000738 8B7DF4                      mov edi,ptrP1M
+  1041 0000073B 8B75F0                      mov esi,ptrP2M
+  1042 0000073E 8B55EC                      mov edx,ptrPPM
+  1043 00000741 8955BC                      mov pPPM,edx
+  1044                                  
+  1045 00000744 8B5DB8                      mov ebx, PICW4
+  1046                                  
+  1047 00000747 B901000000                  mov ecx,1
+  1048                                  iySharp:
+  1049 0000074C 51                          push ecx
+  1050 0000074D B901000000                  mov ecx,1
+  1051                                  ixSharp:
+  1052 00000752 51                          push ecx
+  1053                                  
+  1054 00000753 8B55BC                      mov edx,pPPM
+  1055 00000756 8B441A04                    mov eax,[edx+ebx+4]
+  1056 0000075A 3D00000000                  cmp eax,0
+  1057 0000075F 0F8522000000                jne near NexixSharp   ; Not black
+  1058                                      ;;;;;;;;;;;;;;;;;;
+  1059                                  
+  1060 00000765 E8D4030000                  Call Sum8       ; mm0=|SA|SumR|SumG|SumB|
+  1061                                                      ; also mm7=0
+  1062                                      
+  1063 0000076A 0F6E4C1F04                  movd mm1,[edi+ebx+4]    ;P1M(x,y) | |ARGB|
+  1064 0000076F 0F60CF                      punpcklbw mm1,mm7       ; mm1=|A|R|G|B|
+  1065                                      
+  1066                                      ; mm4 = FP FP FP FP
+  1067                                      ; mm5 = mask to GET RGB
+  1068                                  
+  1069 00000772 0FD5CC                      pmullw mm1,mm4          ; mm1=|FP*A|FP*R|FP*G|FP*B|
+  1070 00000775 0FD9C8                      psubusw mm1,mm0         ; mm1= FPARGB - SumARGB
+  1071                                      
+  1072 00000778 0FD14DDC                    psrlw mm1,FilterParam   ; \dF   NB ZeroFilterParam must = 0
+  1073                                      
+  1074 0000077C 0F67CF                      packuswb mm1,mm7        ; | |ARGB|          
+  1075 0000077F 0FDBCD                      pand mm1,mm5            ; Mask out alpha
+  1076                                  
+  1077 00000782 0F7E4C1E04                  movd[esi+ebx+4],mm1     ; Stalling sequence??
+  1078                                                              ; would need to unroll loop
+  1079                                                              ; to take 2 pixel in more mms
+  1080                                  
+  1081                                  ;;;;;;;;;;;;;;;;;;
+  1082                                  NexixSharp:
+  1083 00000787 81C704000000                add edi,4
+  1084 0000078D 81C604000000                add esi,4
+  1085 00000793 8B55BC                      mov edx,pPPM
+  1086 00000796 81C204000000                add edx,4
+  1087 0000079C 8955BC                      mov pPPM,edx
+  1088                                  
+  1089 0000079F 59                          pop ecx
+  1090 000007A0 41                          inc ecx
+  1091 000007A1 8B45F8                      mov eax,PICW
+  1092 000007A4 48                          dec eax
+  1093 000007A5 39C1                        cmp ecx,eax     ;ix-(PICW-1)
+  1094 000007A7 0F8CA5FFFFFF                jl near ixSharp
+  1095                                  NexiySharp:
+  1096 000007AD 81C708000000                add edi,8
+  1097 000007B3 81C608000000                add esi,8
+  1098 000007B9 8B55BC                      mov edx,pPPM
+  1099 000007BC 81C208000000                add edx,8
+  1100 000007C2 8955BC                      mov pPPM,edx
+  1101                                  
+  1102 000007C5 59                          pop ecx
+  1103 000007C6 41                          inc ecx
+  1104 000007C7 8B45FC                      mov eax,PICH
+  1105 000007CA 48                          dec eax
+  1106 000007CB 39C1                        cmp ecx,eax     ;iy-(PICH-1)
+  1107 000007CD 0F8C79FFFFFF                jl near iySharp
+  1108                                  
+  1109 000007D3 0F77                        emms
+  1110                                  
+  1111 000007D5 C3                      RET
+  1112                                  ;=============================================================
+  1113                                  
+  1114                                  Softness:
+  1115                                  
+  1116 000007D6 B8FFFFFF00                  mov eax,0FFFFFFh
+  1117 000007DB 0F6EE8                      movd mm5,eax        ; mm5 to mask out Alpha
+  1118                                      
+  1119 000007DE 8B7DF4                      mov edi,ptrP1M
+  1120 000007E1 8B75F0                      mov esi,ptrP2M
+  1121 000007E4 8B55EC                      mov edx,ptrPPM
+  1122 000007E7 8955BC                      mov pPPM,edx
+  1123                                  
+  1124 000007EA 8B5DB8                      mov ebx, PICW4
+  1125                                  
+  1126 000007ED B901000000                  mov ecx,1
+  1127                                  iySoft:
+  1128 000007F2 51                          push ecx
+  1129 000007F3 B901000000                  mov ecx,1
+  1130                                  ixSoft:
+  1131 000007F8 51                          push ecx
+  1132                                  
+  1133 000007F9 8B55BC                      mov edx,pPPM
+  1134 000007FC 8B441A04                    mov eax,[edx+ebx+4]
+  1135 00000800 3D00000000                  cmp eax,0
+  1136 00000805 0F8523000000                jne near NexixSoft   ; Not black
+  1137                                      ;;;;;;;;;;;;;;;;;;
+  1138                                  
+  1139 0000080B E82E030000                  Call Sum8       ; mm0=|SA|SumR|SumG|SumB|
+  1140                                                      ; also mm7=0
+  1141                                      
+  1142 00000810 0F71D003                    psrlw mm0,3     ; \8     mm0 = AVA AvR AvG AvB
+  1143                                  
+  1144 00000814 0F6E4C1F04                  movd mm1,[edi+ebx+4]    ;P1M(x,y) | |ARGB|
+  1145 00000819 0F60CF                      punpcklbw mm1,mm7       ; mm1=|A|R|G|B|
+  1146                                      
+  1147 0000081C 0FFDC8                      paddw mm1,mm0           ; mm1= FPARGB + AvARGB
+  1148                                      
+  1149 0000081F 0F71D101                    psrlw mm1,1             ; \2
+  1150                                      
+  1151 00000823 0F67CF                      packuswb mm1,mm7        ; | |ARGB|          
+  1152                                  
+  1153                                      ; mm5 = mask to GET RGB
+  1154                                  
+  1155 00000826 0FDBCD                      pand mm1,mm5            ; Mask out alpha
+  1156                                  
+  1157 00000829 0F7E4C1E04                  movd[esi+ebx+4],mm1     ; Stalling sequence??
+  1158                                                              ; would need to unroll loop
+  1159                                                              ; to take 2 pixel in more mms
+  1160                                  
+  1161                                  ;;;;;;;;;;;;;;;;;;
+  1162                                  NexixSoft:
+  1163 0000082E 81C704000000                add edi,4
+  1164 00000834 81C604000000                add esi,4
+  1165 0000083A 8B55BC                      mov edx,pPPM
+  1166 0000083D 81C204000000                add edx,4
+  1167 00000843 8955BC                      mov pPPM,edx
+  1168                                  
+  1169 00000846 59                          pop ecx
+  1170 00000847 41                          inc ecx
+  1171 00000848 8B45F8                      mov eax,PICW
+  1172 0000084B 48                          dec eax
+  1173 0000084C 39C1                        cmp ecx,eax     ;ix-(PICW-1)
+  1174 0000084E 0F8CA4FFFFFF                jl near ixSoft
+  1175                                  NexiySoft:
+  1176 00000854 81C708000000                add edi,8
+  1177 0000085A 81C608000000                add esi,8
+  1178 00000860 8B55BC                      mov edx,pPPM
+  1179 00000863 81C208000000                add edx,8
+  1180 00000869 8955BC                      mov pPPM,edx
+  1181                                  
+  1182 0000086C 59                          pop ecx
+  1183 0000086D 41                          inc ecx
+  1184 0000086E 8B45FC                      mov eax,PICH
+  1185 00000871 48                          dec eax
+  1186 00000872 39C1                        cmp ecx,eax     ;iy-(PICH-1)
+  1187 00000874 0F8C78FFFFFF                jl near iySoft
+  1188                                  
+  1189                                  
+  1190 0000087A 8B45DC                      mov eax,FilterParam
+  1191 0000087D 3D01000000                  cmp eax,1
+  1192 00000882 0F8498000000                je near SoftRET
+  1193                                      ;====================
+  1194 00000888 89C1                        mov ecx,eax
+  1195                                  ForNN:
+  1196 0000088A 51                          push ecx
+  1197                                      ;====================
+  1198                                  
+  1199                                      ;mov edi,ptrP1M
+  1200                                      
+  1201 0000088B 8B7DF0                      mov edi,ptrP2M
+  1202 0000088E 8B55EC                      mov edx,ptrPPM
+  1203 00000891 8955BC                      mov pPPM,edx
+  1204                                  
+  1205 00000894 8B5DB8                      mov ebx, PICW4
+  1206                                  
+  1207 00000897 B901000000                  mov ecx,1
+  1208                                  iySoftNN:
+  1209 0000089C 51                          push ecx
+  1210 0000089D B901000000                  mov ecx,1
+  1211                                  ixSoftNN:
+  1212 000008A2 51                          push ecx
+  1213                                  
+  1214 000008A3 8B55BC                      mov edx,pPPM
+  1215 000008A6 8B441A04                    mov eax,[edx+ebx+4]
+  1216 000008AA 3D00000000                  cmp eax,0
+  1217 000008AF 0F8523000000                jne near NexixSoftNN   ; Not black
+  1218                                      ;;;;;;;;;;;;;;;;;;
+  1219                                  
+  1220 000008B5 E884020000                  Call Sum8       ; mm0=|SA|SumR|SumG|SumB|
+  1221                                                      ; also mm7=0
+  1222                                      
+  1223 000008BA 0F71D003                    psrlw mm0,3     ; \8     mm0 = AVA AvR AvG AvB
+  1224                                  
+  1225 000008BE 0F6E4C1F04                  movd mm1,[edi+ebx+4]    ;P1M(x,y) | |ARGB|
+  1226 000008C3 0F60CF                      punpcklbw mm1,mm7       ; mm1=|A|R|G|B|
+  1227                                      
+  1228 000008C6 0FFDC8                      paddw mm1,mm0           ; mm1= FPARGB + AvARGB
+  1229                                      
+  1230 000008C9 0F71D101                    psrlw mm1,1             ; \2
+  1231                                      
+  1232 000008CD 0F67CF                      packuswb mm1,mm7        ; | |ARGB|          
+  1233                                  
+  1234                                      ; mm5 = mask to GET RGB
+  1235                                  
+  1236 000008D0 0FDBCD                      pand mm1,mm5            ; Mask out alpha
+  1237                                  
+  1238 000008D3 0F7E4C1F04                  movd[edi+ebx+4],mm1     ; Stalling sequence??
+  1239                                                              ; would need to unroll loop
+  1240                                                              ; to take 2 pixel in more mms
+  1241                                  
+  1242                                  ;;;;;;;;;;;;;;;;;;
+  1243                                  NexixSoftNN:
+  1244 000008D8 81C704000000                add edi,4
+  1245                                      ;add esi,4
+  1246 000008DE 8B55BC                      mov edx,pPPM
+  1247 000008E1 81C204000000                add edx,4
+  1248 000008E7 8955BC                      mov pPPM,edx
+  1249                                  
+  1250 000008EA 59                          pop ecx
+  1251 000008EB 41                          inc ecx
+  1252 000008EC 8B45F8                      mov eax,PICW
+  1253 000008EF 48                          dec eax
+  1254 000008F0 39C1                        cmp ecx,eax     ;ix-(PICW-1)
+  1255 000008F2 0F8CAAFFFFFF                jl near ixSoftNN
+  1256                                  NexiySoftNN:
+  1257 000008F8 81C708000000                add edi,8
+  1258                                      ;add esi,8
+  1259 000008FE 8B55BC                      mov edx,pPPM
+  1260 00000901 81C208000000                add edx,8
+  1261 00000907 8955BC                      mov pPPM,edx
+  1262                                  
+  1263 0000090A 59                          pop ecx
+  1264 0000090B 41                          inc ecx
+  1265 0000090C 8B45FC                      mov eax,PICH
+  1266 0000090F 48                          dec eax
+  1267 00000910 39C1                        cmp ecx,eax     ;iy-(PICH-1)
+  1268 00000912 0F8C84FFFFFF                jl near iySoftNN
+  1269                                  
+  1270                                      ;====================
+  1271                                  
+  1272                                  NexNN:
+  1273 00000918 59                          pop ecx
+  1274 00000919 49                          dec ecx
+  1275 0000091A 0F856AFFFFFF                jnz near ForNN
+  1276                                      ;====================
+  1277                                  
+  1278                                  SoftRET:
+  1279 00000920 0F77                        emms
+  1280                                  
+  1281 00000922 C3                      RET
+  1282                                  ;=============================================================
+  1283                                  
+  1284                                  Brightness:
+  1285                                      
+  1286 00000923 31C0                        xor eax,eax
+  1287 00000925 8945D0                      mov FP,eax
+  1288                                  
+  1289 00000928 8B45DC                      mov eax,dword FilterParam
+  1290 0000092B 3D05000000                  cmp eax,5
+  1291 00000930 7D06                        jge GE5
+  1292                                      
+  1293 00000932 40                          inc eax
+  1294 00000933 E908000000                  jmp StoreFP
+  1295                                  GE5:
+  1296 00000938 B80A000000                  mov eax,10
+  1297 0000093D 2B45DC                      sub eax,FilterParam
+  1298                                  StoreFP:
+  1299 00000940 8945D0                      mov dword FP,eax        ; shr = 2,3,4,5 or 5,4,3,2
+  1300                                  
+  1301 00000943 B8FFFFFF00                  mov eax,0FFFFFFh
+  1302 00000948 0F6EE8                      movd mm5,eax        ; mm5 to mask out Alpha
+  1303                                      
+  1304 0000094B 8B7DF4                      mov edi,ptrP1M
+  1305 0000094E 8B75F0                      mov esi,ptrP2M
+  1306 00000951 8B55EC                      mov edx,ptrPPM
+  1307 00000954 8955BC                      mov pPPM,edx
+  1308                                  
+  1309 00000957 31D2                        xor edx,edx
+  1310 00000959 8B45FC                      mov eax,PICH
+  1311 0000095C 8B5DF8                      mov ebx,PICW
+  1312 0000095F F7E3                        mul ebx
+  1313 00000961 89C1                        mov ecx,eax
+  1314                                  
+  1315 00000963 8B5DB8                      mov ebx, PICW4
+  1316 00000966 0FEFFF                      pxor mm7,mm7
+  1317                                  
+  1318                                  
+  1319                                  ForBright:
+  1320 00000969 51                          push ecx
+  1321                                  
+  1322 0000096A 8B55BC                      mov edx,pPPM
+  1323 0000096D 8B02                        mov eax,[edx]
+  1324 0000096F 3D00000000                  cmp eax,0
+  1325 00000974 0F852B000000                jne near NexBright   ; Not black
+  1326                                      ;;;;;;;;;;;;;;;;;;
+  1327                                  
+  1328 0000097A 0F6E0F                      movd mm1,[edi]          ;P1M(x,y) | |ARGB|
+  1329 0000097D 0F60CF                      punpcklbw mm1,mm7       ; mm1=|A|R|G|B|
+  1330                                  
+  1331 00000980 0F6FD1                      movq mm2,mm1            ; mm2=|A|R|G|B|
+  1332                                  
+  1333 00000983 0FD155D0                    psrlw mm2,FP        ; shr 5,4,3,2 \32,16,8,4
+  1334                                                          ; NB ZeroFP must be = 0
+  1335                                  
+  1336                                  shrdone:
+  1337 00000987 8B45DC                      mov eax,FilterParam
+  1338 0000098A 3D05000000                  cmp eax,5
+  1339 0000098F 7D08                        jge GE52
+  1340                                      
+  1341 00000991 0FD9CA                      psubusw mm1,mm2         ; ARGB - ARGB\FilterParam
+  1342 00000994 E903000000                  jmp NowPack
+  1343                                  GE52:
+  1344 00000999 0FDDCA                      paddusw mm1,mm2         ; ARGB + ARGB\FilterParam
+  1345                                  
+  1346                                  NowPack:
+  1347                                      
+  1348 0000099C 0F67CF                      packuswb mm1,mm7        ; | |ARGB|          
+  1349                                  
+  1350                                      ; mm5 = mask to GET RGB
+  1351                                  
+  1352 0000099F 0FDBCD                      pand mm1,mm5            ; Mask out alpha
+  1353                                  
+  1354 000009A2 0F7E0E                      movd[esi],mm1       ; Stalling sequence??
+  1355                                                          ; would need to unroll loop
+  1356                                                          ; to take 2 pixel in more mms
+  1357                                  ;;;;;;;;;;;;;;;;;;
+  1358                                  NexBright:
+  1359 000009A5 81C704000000                add edi,4
+  1360 000009AB 81C604000000                add esi,4
+  1361 000009B1 8B55BC                      mov edx,pPPM
+  1362 000009B4 81C204000000                add edx,4
+  1363 000009BA 8955BC                      mov pPPM,edx
+  1364                                  
+  1365 000009BD 59                          pop ecx
+  1366 000009BE 49                          dec ecx
+  1367 000009BF 0F85A4FFFFFF                jnz near ForBright
+  1368                                  
+  1369 000009C5 0F77                        emms
+  1370                                  
+  1371 000009C7 C3                      RET
+  1372                                  ;=============================================================
+  1373                                  
+  1374                                  HorzEdges:  ; In ky=iy
+  1375                                  
+  1376 000009C8 31D2                        xor edx,edx
+  1377 000009CA 8B45C4                      mov eax,ky
+  1378 000009CD 48                          dec eax
+  1379 000009CE 8B5DB8                      mov ebx,PICW4
+  1380 000009D1 F7E3                        mul ebx         ; Line Offset eax = PICW4*(ky-1)
+  1381                                  
+  1382 000009D3 8B7DF4                      mov edi,ptrP1M
+  1383 000009D6 01C7                        add edi,eax     ; edi-> bP1M(1,1,iy)
+  1384 000009D8 8B75F0                      mov esi,ptrP2M
+  1385 000009DB 01C6                        add esi,eax     ; esi-> bP2M(1,1,iy)
+  1386 000009DD 8B5DB8                      mov ebx, PICW4
+  1387                                  
+  1388 000009E0 8B55EC                      mov edx,ptrPPM
+  1389 000009E3 01C2                        add edx,eax
+  1390 000009E5 8955BC                      mov pPPM,edx
+  1391                                  
+  1392                                  
+  1393 000009E8 B902000000                  mov ecx,2
+  1394                                  
+  1395                                  ForH:
+  1396                                  
+  1397 000009ED 8B55BC                      mov edx,pPPM
+  1398 000009F0 8B4204                      mov eax,[edx+4]
+  1399 000009F3 3D00000000                  cmp eax,0
+  1400 000009F8 0F8565000000                jne near NexixH   ; Not black
+  1401                                      ;;;;;;;;;;;;;;;;;;
+  1402                                  
+  1403                                      ; RGBAV
+  1404 000009FE 0FEFFF                      pxor mm7,mm7
+  1405 00000A01 0F6E07                      movd mm0,[edi]
+  1406 00000A04 0F6E4F08                    movd mm1,[edi+8]
+  1407 00000A08 0F60C7                      punpcklbw mm0,mm7
+  1408 00000A0B 0F60CF                      punpcklbw mm1,mm7
+  1409 00000A0E 0FDDC1                      paddusw mm0,mm1
+  1410 00000A11 0F71D001                    psrlw mm0,1         ; mm0 = RGB AV
+  1411 00000A15 0F6FE0                      movq mm4,mm0        ; mm4 = RGB AV
+  1412                                  
+  1413                                      ; RGBDiff           ; RGBIFF <= Threshold
+  1414 00000A18 0F6E5704                    movd mm2,[edi+4]    ; P1M(1,ix,iy)
+  1415 00000A1C 0F60D7                      punpcklbw mm2,mm7       ; A R G B
+  1416 00000A1F 0F6FD8                      movq mm3,mm0            ; mm0 = RGB AV
+  1417 00000A22 0FD9C2                      psubusw mm0,mm2         ; RGBAV-RGB
+  1418 00000A25 0FD9D3                      psubusw mm2,mm3         ; RGB-RGBAV
+  1419 00000A28 0FEBC2                      por mm0,mm2             ; mm0 = ABS(ARGBAV-ARGB)
+  1420                                      
+  1421 00000A2B 0F7EC0                      movd eax,mm0    ; AvG-G|AvB-B
+  1422 00000A2E 25FFFF0000                  and eax,0FFFFh  ; AvB-B
+  1423 00000A33 3B45E8                      cmp eax,Threshold
+  1424 00000A36 7F20                        jg HReplace
+  1425                                  
+  1426 00000A38 0F7EC0                      movd eax,mm0
+  1427 00000A3B C1E810                      shr eax,16      ; AvG-G
+  1428 00000A3E 3B45E8                      cmp eax,Threshold
+  1429 00000A41 7F15                        jg HReplace
+  1430                                  
+  1431 00000A43 0F73D020                    psrlq mm0,32
+  1432 00000A47 0F7EC0                      movd eax,mm0    ; AvA-A|AvR-R
+  1433 00000A4A 25FFFF0000                  and eax,0FFFFh  ; AvR-R
+  1434 00000A4F 3B45E8                      cmp eax,Threshold
+  1435 00000A52 0F8E0B000000                jle near NexixH
+  1436                                  
+  1437                                  HReplace:
+  1438                                  
+  1439 00000A58 0F67E7                      packuswb mm4,mm7    ; mm4 = | |ARGB|
+  1440 00000A5B 0F7E6604                    movd[esi+4],mm4
+  1441 00000A5F 0F7E6704                    movd[edi+4],mm4
+  1442                                  
+  1443                                  ;;;;;;;;;;;;;;;;;;
+  1444                                  NexixH:
+  1445                                  
+  1446 00000A63 81C704000000                add edi,4
+  1447 00000A69 81C604000000                add esi,4
+  1448                                  
+  1449 00000A6F 8B55BC                      mov edx,pPPM
+  1450 00000A72 81C204000000                add edx,4
+  1451 00000A78 8955BC                      mov pPPM,edx
+  1452                                  
+  1453 00000A7B 41                          inc ecx
+  1454 00000A7C 8B45F8                      mov eax,PICW
+  1455 00000A7F 48                          dec eax             ; PICW-1
+  1456 00000A80 39C1                        cmp ecx,eax
+  1457 00000A82 0F8C65FFFFFF                jl near ForH
+  1458                                      
+  1459 00000A88 0F77                        emms
+  1460                                  
+  1461 00000A8A C3                      RET
+  1462                                  ;=============================================================
+  1463                                      
+  1464                                  VertEdges:  ;In kx=ix = 1,2    PICW-1, PICW
+  1465                                      
+  1466 00000A8B 8B45C8                      mov eax,kx
+  1467 00000A8E 48                          dec eax
+  1468 00000A8F C1E002                      shl eax,2       ; 4*(kx-1)
+  1469                                  
+  1470 00000A92 8B7DF4                      mov edi,ptrP1M
+  1471 00000A95 01C7                        add edi,eax     ; edi-> bP1M(1,kx,1)
+  1472 00000A97 8B75F0                      mov esi,ptrP2M
+  1473 00000A9A 01C6                        add esi,eax     ; esi-> bP2M(1,kx,1)
+  1474 00000A9C 8B5DB8                      mov ebx, PICW4
+  1475                                  
+  1476 00000A9F 8B55EC                      mov edx,ptrPPM
+  1477 00000AA2 01C2                        add edx,eax
+  1478 00000AA4 8955BC                      mov pPPM,edx
+  1479                                  
+  1480 00000AA7 B902000000                  mov ecx,2
+  1481                                  
+  1482                                  ForV:
+  1483                                  
+  1484 00000AAC 8B55BC                      mov edx,pPPM
+  1485 00000AAF 8B041A                      mov eax,[edx+ebx]
+  1486 00000AB2 3D00000000                  cmp eax,0
+  1487 00000AB7 0F8565000000                jne near NexiyV   ; Not black
+  1488                                      ;;;;;;;;;;;;;;;;;;
+  1489                                  
+  1490                                      ; RGBAV
+  1491 00000ABD 0FEFFF                      pxor mm7,mm7
+  1492 00000AC0 0F6E07                      movd mm0,[edi]
+  1493 00000AC3 0F6E0C5F                    movd mm1,[edi+2*ebx]
+  1494 00000AC7 0F60C7                      punpcklbw mm0,mm7
+  1495 00000ACA 0F60CF                      punpcklbw mm1,mm7
+  1496 00000ACD 0FDDC1                      paddusw mm0,mm1
+  1497 00000AD0 0F71D001                    psrlw mm0,1         ; mm0 = RGB AV
+  1498 00000AD4 0F6FE0                      movq mm4,mm0        ; mm4 = RGB AV
+  1499                                  
+  1500                                      ; RGBDiff           ; RGBIFF <= Threshold
+  1501 00000AD7 0F6E141F                    movd mm2,[edi+ebx]  ; P1M(1,ix,iy)
+  1502 00000ADB 0F60D7                      punpcklbw mm2,mm7       ; A R G B
+  1503 00000ADE 0F6FD8                      movq mm3,mm0            ; mm0 = RGB AV
+  1504 00000AE1 0FD9C2                      psubusw mm0,mm2         ; RGBAV-RGB
+  1505 00000AE4 0FD9D3                      psubusw mm2,mm3         ; RGB-RGBAV
+  1506 00000AE7 0FEBC2                      por mm0,mm2             ; mm0 = ABS(ARGBAV-ARGB)
+  1507                                      
+  1508 00000AEA 0F7EC0                      movd eax,mm0    ; AvG-G|AvB-B
+  1509 00000AED 25FFFF0000                  and eax,0FFFFh  ; AvB-B
+  1510 00000AF2 3B45E8                      cmp eax,Threshold
+  1511 00000AF5 7F20                        jg VReplace
+  1512                                  
+  1513 00000AF7 0F7EC0                      movd eax,mm0
+  1514 00000AFA C1E810                      shr eax,16      ; AvG-G
+  1515 00000AFD 3B45E8                      cmp eax,Threshold
+  1516 00000B00 7F15                        jg VReplace
+  1517                                  
+  1518 00000B02 0F73D020                    psrlq mm0,32
+  1519 00000B06 0F7EC0                      movd eax,mm0    ; AvA-A|AvR-R
+  1520 00000B09 25FFFF0000                  and eax,0FFFFh  ; AvR-R
+  1521 00000B0E 3B45E8                      cmp eax,Threshold
+  1522 00000B11 0F8E0B000000                jle near NexiyV
+  1523                                  
+  1524                                  VReplace:
+  1525                                  
+  1526 00000B17 0F67E7                      packuswb mm4,mm7    ; mm4 = | |ARGB|
+  1527 00000B1A 0F7E241E                    movd[esi+ebx],mm4
+  1528 00000B1E 0F7E241F                    movd[edi+ebx],mm4
+  1529                                  
+  1530                                  ;;;;;;;;;;;;;;;;;;
+  1531                                  NexiyV:
+  1532 00000B22 01DF                        add edi,ebx
+  1533 00000B24 01DE                        add esi,ebx
+  1534                                  
+  1535 00000B26 8B55BC                      mov edx,pPPM
+  1536 00000B29 01DA                        add edx,ebx
+  1537 00000B2B 8955BC                      mov pPPM,edx
+  1538                                  
+  1539                                  
+  1540 00000B2E 41                          inc ecx
+  1541 00000B2F 8B45FC                      mov eax,PICH
+  1542 00000B32 48                          dec eax             ; PICH-1
+  1543 00000B33 39C1                        cmp ecx,eax
+  1544 00000B35 0F8C71FFFFFF                jl near ForV
+  1545                                      
+  1546 00000B3B 0F77                        emms
+  1547                                  
+  1548 00000B3D C3                      RET
+  1549                                  ;====================================================
+  1550                                  
+  1551                                  Sum8:   ; In edi->BotLeft, ebx PICW*4
+  1552                                          ; Out: mm0 = A% R% G% B% lob
+  1553 00000B3E 0FEFFF                      pxor mm7,mm7
+  1554                                  
+  1555                                      ; Row 1
+  1556 00000B41 0F6E07                      movd mm0,[edi]
+  1557 00000B44 0F6E4F04                    movd mm1,[edi+4]
+  1558 00000B48 0F6E5708                    movd mm2,[edi+8]
+  1559 00000B4C 0F60C7                      punpcklbw mm0,mm7
+  1560 00000B4F 0F60CF                      punpcklbw mm1,mm7
+  1561 00000B52 0F60D7                      punpcklbw mm2,mm7
+  1562 00000B55 0FDDC1                      paddusw mm0,mm1
+  1563 00000B58 0FDDC2                      paddusw mm0,mm2
+  1564                                      
+  1565                                      ; Row 2
+  1566 00000B5B 0F6E0C1F                    movd mm1,[edi+ebx]
+  1567 00000B5F 0F6E541F08                  movd mm2,[edi+ebx+8]
+  1568 00000B64 0F60CF                      punpcklbw mm1,mm7
+  1569 00000B67 0F60D7                      punpcklbw mm2,mm7
+  1570 00000B6A 0FDDC1                      paddusw mm0,mm1
+  1571 00000B6D 0FDDC2                      paddusw mm0,mm2
+  1572                                      
+  1573                                      
+  1574                                      ; Row 3
+  1575 00000B70 0F6E0C5F                    movd mm1,[edi+2*ebx]
+  1576 00000B74 0F6E545F04                  movd mm2,[edi+2*ebx+4]
+  1577 00000B79 0F6E5C5F08                  movd mm3,[edi+2*ebx+8]
+  1578 00000B7E 0F60CF                      punpcklbw mm1,mm7
+  1579 00000B81 0F60D7                      punpcklbw mm2,mm7
+  1580 00000B84 0F60DF                      punpcklbw mm3,mm7
+  1581 00000B87 0FDDC1                      paddusw mm0,mm1
+  1582 00000B8A 0FDDC2                      paddusw mm0,mm2
+  1583 00000B8D 0FDDC3                      paddusw mm0,mm3 ; mm0 = A% R% G% B% lob
+  1584 00000B90 C3                      RET
+  1585                                  ;====================================================
+  1586                                  
+  1587                                  Sum12:  ; In edi->BotLeft, ebx PICW*4
+  1588                                  
+  1589 00000B91 57                          push edi
+  1590                                  
+  1591 00000B92 0FEFFF                      pxor mm7,mm7
+  1592                                  
+  1593                                      ; Row 1
+  1594 00000B95 0F6E07                      movd mm0,[edi]
+  1595 00000B98 0F6E4F04                    movd mm1,[edi+4]
+  1596 00000B9C 0F6E5708                    movd mm2,[edi+8]
+  1597 00000BA0 0F6E5F0C                    movd mm3,[edi+12]
+  1598 00000BA4 0F60C7                      punpcklbw mm0,mm7
+  1599 00000BA7 0F60CF                      punpcklbw mm1,mm7
+  1600 00000BAA 0F60D7                      punpcklbw mm2,mm7
+  1601 00000BAD 0F60DF                      punpcklbw mm3,mm7
+  1602 00000BB0 0FDDC1                      paddusw mm0,mm1
+  1603 00000BB3 0FDDC2                      paddusw mm0,mm2
+  1604 00000BB6 01DF                        add edi,ebx
+  1605                                  
+  1606 00000BB8 0FDDC3                      paddusw mm0,mm3
+  1607                                  
+  1608                                      ; Row 2
+  1609 00000BBB 0F6E0F                      movd mm1,[edi]
+  1610 00000BBE 0F6E570C                    movd mm2,[edi+12]
+  1611 00000BC2 0F60CF                      punpcklbw mm1,mm7
+  1612 00000BC5 0F60D7                      punpcklbw mm2,mm7
+  1613 00000BC8 0FDDC1                      paddusw mm0,mm1
+  1614 00000BCB 01DF                        add edi,ebx
+  1615                                  
+  1616 00000BCD 0FDDC2                      paddusw mm0,mm2
+  1617                                      
+  1618                                      
+  1619                                      ; Row 3
+  1620 00000BD0 0F6E0F                      movd mm1,[edi]
+  1621 00000BD3 0F6E570C                    movd mm2,[edi+12]
+  1622 00000BD7 0F60CF                      punpcklbw mm1,mm7
+  1623 00000BDA 0F60D7                      punpcklbw mm2,mm7
+  1624 00000BDD 0FDDC1                      paddusw mm0,mm1
+  1625 00000BE0 01DF                        add edi,ebx
+  1626                                  
+  1627 00000BE2 0FDDC2                      paddusw mm0,mm2
+  1628                                    
+  1629                                      ; Row 4
+  1630 00000BE5 0F6E0F                      movd mm1,[edi]
+  1631 00000BE8 0F6E5704                    movd mm2,[edi+4]
+  1632 00000BEC 0F6E5F08                    movd mm3,[edi+8]
+  1633 00000BF0 0F6E670C                    movd mm4,[edi+12]
+  1634 00000BF4 0F60CF                      punpcklbw mm1,mm7
+  1635 00000BF7 0F60D7                      punpcklbw mm2,mm7
+  1636 00000BFA 0F60DF                      punpcklbw mm3,mm7
+  1637 00000BFD 0F60E7                      punpcklbw mm4,mm7
+  1638 00000C00 0FDDC1                      paddusw mm0,mm1
+  1639 00000C03 0FDDC2                      paddusw mm0,mm2
+  1640 00000C06 0FDDC3                      paddusw mm0,mm3
+  1641 00000C09 0FDDC4                      paddusw mm0,mm4 ; A% R% G% B% lob
+  1642                                  
+  1643 00000C0C 5F                          pop edi
+  1644                                  
+  1645 00000C0D C3                      RET
+  1646                                  ;====================================================
+  1647                                  
+  1648                                  Sum16:  ; In edi->BotLeft, ebx PICW*4
+  1649                                      
+  1650 00000C0E 57                          push edi
+  1651                                  
+  1652 00000C0F 0FEFFF                      pxor mm7,mm7
+  1653                                  
+  1654                                      ; Row 1
+  1655 00000C12 0F6E07                      movd mm0,[edi]
+  1656 00000C15 0F6E4F04                    movd mm1,[edi+4]
+  1657 00000C19 0F6E5708                    movd mm2,[edi+8]
+  1658 00000C1D 0F6E5F0C                    movd mm3,[edi+12]
+  1659 00000C21 0F6E6710                    movd mm4,[edi+16]
+  1660 00000C25 0F60C7                      punpcklbw mm0,mm7
+  1661 00000C28 0F60CF                      punpcklbw mm1,mm7
+  1662 00000C2B 0F60D7                      punpcklbw mm2,mm7
+  1663 00000C2E 0F60DF                      punpcklbw mm3,mm7
+  1664 00000C31 0F60E7                      punpcklbw mm4,mm7
+  1665 00000C34 0FDDC1                      paddusw mm0,mm1
+  1666 00000C37 0FDDC2                      paddusw mm0,mm2
+  1667 00000C3A 0FDDC3                      paddusw mm0,mm3
+  1668 00000C3D 01DF                        add edi,ebx
+  1669                                  
+  1670 00000C3F 0FDDC4                      paddusw mm0,mm4
+  1671                                  
+  1672                                      ; Row 2
+  1673 00000C42 0F6E0F                      movd mm1,[edi]
+  1674 00000C45 0F6E5710                    movd mm2,[edi+16]
+  1675 00000C49 0F60CF                      punpcklbw mm1,mm7
+  1676 00000C4C 0F60D7                      punpcklbw mm2,mm7
+  1677 00000C4F 0FDDC1                      paddusw mm0,mm1
+  1678 00000C52 01DF                        add edi,ebx
+  1679                                  
+  1680 00000C54 0FDDC2                      paddusw mm0,mm2
+  1681                                      
+  1682                                      
+  1683                                      ; Row 3
+  1684 00000C57 0F6E0F                      movd mm1,[edi]
+  1685 00000C5A 0F6E5710                    movd mm2,[edi+16]
+  1686 00000C5E 0F60CF                      punpcklbw mm1,mm7
+  1687 00000C61 0F60D7                      punpcklbw mm2,mm7
+  1688 00000C64 0FDDC1                      paddusw mm0,mm1
+  1689 00000C67 01DF                        add edi,ebx
+  1690                                  
+  1691 00000C69 0FDDC2                      paddusw mm0,mm2
+  1692                                  
+  1693                                      
+  1694                                      ; Row 4
+  1695 00000C6C 0F6E0F                      movd mm1,[edi]
+  1696 00000C6F 0F6E5710                    movd mm2,[edi+16]
+  1697 00000C73 0F60CF                      punpcklbw mm1,mm7
+  1698 00000C76 0F60D7                      punpcklbw mm2,mm7
+  1699 00000C79 0FDDC1                      paddusw mm0,mm1
+  1700 00000C7C 01DF                        add edi,ebx
+  1701                                  
+  1702 00000C7E 0FDDC2                      paddusw mm0,mm2
+  1703                                  
+  1704                                      ; Row 5
+  1705 00000C81 0F6E0F                      movd mm1,[edi]
+  1706 00000C84 0F6E5704                    movd mm2,[edi+4]
+  1707 00000C88 0F6E5F08                    movd mm3,[edi+8]
+  1708 00000C8C 0F6E670C                    movd mm4,[edi+12]
+  1709 00000C90 0F6E6F10                    movd mm5,[edi+16]
+  1710 00000C94 0F60CF                      punpcklbw mm1,mm7
+  1711 00000C97 0F60D7                      punpcklbw mm2,mm7
+  1712 00000C9A 0F60DF                      punpcklbw mm3,mm7
+  1713 00000C9D 0F60E7                      punpcklbw mm4,mm7
+  1714 00000CA0 0F60EF                      punpcklbw mm5,mm7
+  1715 00000CA3 0FDDC1                      paddusw mm0,mm1
+  1716 00000CA6 0FDDC2                      paddusw mm0,mm2
+  1717 00000CA9 0FDDC3                      paddusw mm0,mm3
+  1718 00000CAC 0FDDC4                      paddusw mm0,mm4
+  1719 00000CAF 0FDDC5                      paddusw mm0,mm5 ; A% R% G% B% lob
+  1720                                  
+  1721                                  
+  1722 00000CB2 5F                          pop edi
+  1723 00000CB3 C3                      RET
+  1724                                  ;====================================================
+  1725                                  
+  1726                                  TestThreshold:   ; TEST THRESHOLD In:  mm0=mm4=|AvA|AvR|AvG|AvB|
+  1727                                                   ;          &  edi,esi -> P1M(ix,iy), P2M(ix,iy)
+  1728                                                   ;          &  mm6 = TH TH TH TH
+  1729                                  
+  1730 00000CB4 0F6E0F                      movd mm1,[edi]
+  1731 00000CB7 0F60CF                      punpcklbw mm1,mm7
+  1732 00000CBA 0F6FD0                      movq mm2,mm0
+  1733 00000CBD 0FD9C1                      psubusw mm0,mm1
+  1734 00000CC0 0FD9CA                      psubusw mm1,mm2
+  1735 00000CC3 0FEBC1                      por mm0,mm1         ; mm0=ABS |AvA-A|AvR-R|AvG-G|AvB-B|
+  1736                                      
+  1737 00000CC6 0F65C6                      pcmpgtw mm0,mm6     ; is data in mm0 > TH in mm6
+  1738 00000CC9 0F63C0                      packsswb mm0,mm0    ; pack result into mm0
+  1739 00000CCC 0F7EC0                      movd eax,mm0
+  1740 00000CCF 25FFFFFF00                  and eax,0FFFFFFh
+  1741 00000CD4 3D00000000                  cmp eax,0
+  1742 00000CD9 740F                        je TTRET            ; false all data <= TH
+  1743                                  
+  1744 00000CDB 0F6FC4                      movq mm0,mm4
+  1745                                      
+  1746 00000CDE 0F67E7                      packuswb mm4,mm7    ; mm4 = | |ARGB|
+  1747 00000CE1 0F7E26                      movd[esi],mm4
+  1748 00000CE4 0F7E27                      movd[edi],mm4
+  1749                                      
+  1750 00000CE7 0F6FE0                      movq mm4,mm0
+  1751                                  TTRET:
+  1752 00000CEA 0F6FC4                      movq mm0,mm4
+  1753 00000CED C3                      RET
+  1754                                  
+  1755                                  ;====================================================
+  1756                                  ;
+  1757                                  ; NOT USED
+  1758                                  ;GetAddr:    ; IN: edi, kx,ky  OUT: edi-> pmem(1,kx,ky)
+  1759                                  ;            ; Addr=edi= 4 * [PICW * (ky-1) + (kx-1)]
+  1760                                  ;    mov eax,ky
+  1761                                  ;    dec eax
+  1762                                  ;    mov ebx,PICW
+  1763                                  ;    mul ebx
+  1764                                  ;    mov ebx,kx
+  1765                                  ;    dec ebx
+  1766                                  ;    add eax,ebx
+  1767                                  ;    shl eax,2   ;*4
+  1768                                  ;    add edi,eax
+  1769                                  ;RET
+  1770                                  ;
+  1771                                  ;=============================================================
+  1772                                  
+  1773                                  ; Jump table
+  1774                                  [SECTION .data]
+  1775 00000000 [9B000000]              Sub0 dd Despec1
+  1776 00000004 [90010000]              Sub1 dd Despec2
+  1777 00000008 [F7020000]              Sub2 dd Despec3
+  1778 0000000C [C7040000]              Sub3 dd Despec4
+  1779 00000010 [EF040000]              Sub4 dd Despec5
+  1780 00000014 [F2050000]              Sub5 dd Despec6
+  1781 00000018 [11070000]              Sub6 dd Sharpness
+  1782 0000001C [D6070000]              Sub7 dd Softness
+  1783 00000020 [23090000]              Sub8 dd Brightness
+  1784                                  ;Trebor Tnemyar
